@@ -7,339 +7,229 @@ College Project using SrvDB Vector Database
 
 import streamlit as st
 import pandas as pd
-import numpy as np
 import plotly.express as px
 import plotly.graph_objects as go
-from pathlib import Path
-import json
-import time
-from datetime import datetime
-
-# Custom modules
 from srvdb_manager import SrvDBManager
-from recommender import MusicRecommender
-from data_processor import AudioProcessor
+from recommender import BookRecommender
+import time
 
-# Page configuration
+# Page Configuration
 st.set_page_config(
-    page_title="MelodyMatch AI",
-    page_icon="🎵",
+    page_title="PageTurner AI",
+    page_icon="📚",
     layout="wide",
     initial_sidebar_state="expanded"
 )
 
-# Custom CSS
+# Custom CSS - Professional/Library Theme
 st.markdown("""
 <style>
-    .main {
-        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    /* Main Background */
+    .stApp {
+        background-color: #Fdfbf7; /* Cream/Paper white */
+        color: #2c3e50;
+        font-family: 'Merriweather', 'Georgia', serif;
     }
+    
+    /* Sidebar */
+    [data-testid="stSidebar"] {
+        background-color: #2c3e50;
+        color: #ecf0f1;
+    }
+    [data-testid="stSidebar"] p, [data-testid="stSidebar"] span {
+        color: #ecf0f1;
+    }
+    
+    /* Typography */
+    h1, h2, h3, h4 {
+        font-family: 'Playfair Display', 'Times New Roman', serif;
+        color: #2c3e50;
+    }
+    
+    /* Buttons */
     .stButton>button {
         width: 100%;
-        border-radius: 20px;
-        background: linear-gradient(90deg, #667eea 0%, #764ba2 100%);
+        border-radius: 4px;
+        background-color: #bfa378; /* Gold/Antique Paper */
         color: white;
         border: none;
+        padding: 8px 16px;
+        font-family: 'Lato', sans-serif;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 1px;
+        transition: all 0.3s ease;
+    }
+    .stButton>button:hover {
+        background-color: #a68b5e;
+        box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+    }
+    
+    /* Input Fields */
+    .stTextInput>div>div>input {
+        background-color: #ffffff;
+        border: 1px solid #bdc3c7;
+        border-radius: 4px;
         padding: 10px;
+        font-family: 'Lato', sans-serif;
+    }
+    
+    /* Book Card */
+    .book-card {
+        background-color: #ffffff;
+        border: 1px solid #e0e0e0;
+        border-radius: 2px;
+        padding: 20px;
+        box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+        transition: all 0.3s ease;
+        margin-bottom: 20px;
+    }
+    .book-card:hover {
+        box-shadow: 0 8px 16px rgba(0,0,0,0.1);
+        transform: translateY(-2px);
+    }
+    
+    /* Metrics */
+    .metric-container {
+        pointer-events: none;
+        background-color: #ffffff;
+        border: 1px solid #ecf0f1;
+        padding: 15px;
+        border-radius: 2px;
+        text-align: center;
+    }
+    .metric-value {
+        font-family: 'Playfair Display', serif;
+        font-size: 28px;
+        color: #2c3e50;
         font-weight: bold;
     }
-    .song-card {
-        background: rgba(255, 255, 255, 0.1);
-        border-radius: 15px;
-        padding: 20px;
-        margin: 10px 0;
-        backdrop-filter: blur(10px);
-        border: 1px solid rgba(255, 255, 255, 0.2);
+    .metric-label {
+        font-family: 'Lato', sans-serif;
+        font-size: 12px;
+        color: #7f8c8d;
+        text-transform: uppercase;
+        letter-spacing: 1px;
     }
-    .metric-card {
-        background: linear-gradient(135deg, rgba(102, 126, 234, 0.2) 0%, rgba(118, 75, 162, 0.2) 100%);
-        border-radius: 10px;
-        padding: 15px;
-        text-align: center;
+    
+    /* Rating Stars */
+    .star-rating {
+        color: #f1c40f;
+        font-size: 16px;
     }
 </style>
 """, unsafe_allow_html=True)
 
-# Initialize session state
-if 'db_manager' not in st.session_state:
-    st.session_state.db_manager = None
+# Application State
+if 'recommender' not in st.session_state:
     st.session_state.recommender = None
-    st.session_state.favorites = []
+    st.session_state.bookmarks = []
     st.session_state.search_history = []
-    st.session_state.current_song = None
+    st.session_state.search_results = None
 
 def init_system():
     """Initialize the recommendation system"""
-    try:
-        with st.spinner("🚀 Initializing MelodyMatch AI..."):
-            st.session_state.db_manager = SrvDBManager(
-                db_path="./db/music_vectors",
-                dimension=128
-            )
-            st.session_state.recommender = MusicRecommender(
-                st.session_state.db_manager
-            )
-        st.success("✅ System initialized successfully!")
-        return True
-    except Exception as e:
-        st.error(f"❌ Error initializing system: {str(e)}")
-        st.info("💡 Please run `python data_processor.py --build-database` first")
-        return False
+    if st.session_state.recommender is None:
+        try:
+            with st.spinner("� Initializing PageTurner AI..."):
+                # Using specific book vectors path
+                db_manager = SrvDBManager(db_path="./db/book_vectors")
+                st.session_state.recommender = BookRecommender(db_manager)
+            st.success("✅ System initialized successfully!")
+            return True
+        except Exception as e:
+            st.error(f"❌ Failed to initialize system: {e}")
+            st.info("💡 Please ensure the book vector database is built.")
+            return False
+    return True
 
-def display_metrics():
-    """Display system metrics"""
-    if st.session_state.db_manager:
-        stats = st.session_state.db_manager.get_stats()
-        
-        col1, col2, col3, col4 = st.columns(4)
+def display_book_card(book_data, score=None):
+    """Display a professional book card"""
+    # Create a nice layout
+    with st.container():
+        col1, col2 = st.columns([1, 4])
         
         with col1:
-            st.markdown(f"""
-            <div class="metric-card">
-                <h3>🎵 Total Songs</h3>
-                <h2>{stats['total_songs']:,}</h2>
-            </div>
-            """, unsafe_allow_html=True)
-        
+            st.image(book_data.get('cover_url', 'https://via.placeholder.com/150'), use_column_width=True)
+            
         with col2:
-            st.markdown(f"""
-            <div class="metric-card">
-                <h3>🎸 Genres</h3>
-                <h2>{stats['total_genres']}</h2>
-            </div>
-            """, unsafe_allow_html=True)
-        
-        with col3:
-            st.markdown(f"""
-            <div class="metric-card">
-                <h3>⚡ Avg Search Time</h3>
-                <h2>{stats['avg_search_time']:.2f}ms</h2>
-            </div>
-            """, unsafe_allow_html=True)
-        
-        with col4:
-            st.markdown(f"""
-            <div class="metric-card">
-                <h3>❤️ Favorites</h3>
-                <h2>{len(st.session_state.favorites)}</h2>
-            </div>
-            """, unsafe_allow_html=True)
-
-def display_song_card(song_data, similarity_score=None):
-    """Display a song card with details"""
-    col1, col2 = st.columns([1, 3])
-    
-    with col1:
-        # Placeholder for album art (could be enhanced with Spotify API)
-        st.markdown(f"""
-        <div style="width: 100px; height: 100px; background: linear-gradient(135deg, #667eea, #764ba2); 
-                    border-radius: 10px; display: flex; align-items: center; justify-content: center;">
-            <span style="font-size: 40px;">🎵</span>
-        </div>
-        """, unsafe_allow_html=True)
-    
-    with col2:
-        st.markdown(f"### {song_data['title']}")
-        st.markdown(f"**Artist:** {song_data['artist']}")
-        st.markdown(f"**Genre:** {song_data['genre']}")
-        
-        if similarity_score is not None:
-            st.progress(similarity_score)
-            st.caption(f"Match Score: {similarity_score*100:.1f}%")
-        
-        col_a, col_b, col_c = st.columns(3)
-        
-        with col_a:
-            if st.button("▶️ Play", key=f"play_{song_data['id']}"):
-                st.session_state.current_song = song_data
-                st.rerun()
-        
-        with col_b:
-            if st.button("❤️ Like", key=f"like_{song_data['id']}"):
-                if song_data['id'] not in st.session_state.favorites:
-                    st.session_state.favorites.append(song_data['id'])
-                    st.success("Added to favorites!")
-        
-        with col_c:
-            if st.button("🔍 Similar", key=f"similar_{song_data['id']}"):
-                st.session_state.current_song = song_data
-                st.rerun()
+            st.markdown(f"### {book_data['title']}")
+            st.markdown(f"**By {book_data['author']}**")
+            
+            # Star Rating
+            rating = book_data.get('rating', 0)
+            full_stars = int(rating)
+            has_half = rating % 1 >= 0.5
+            stars = "⭐" * full_stars + ("½" if has_half else "")
+            st.markdown(f"<span class='star-rating'>{stars}</span> ({rating}/5.0)", unsafe_allow_html=True)
+            
+            st.markdown(f"_{book_data['genre']} • {book_data.get('year', 'N/A')} • {book_data.get('pages', 0)} pages_")
+            
+            with st.expander("📖 Read Description"):
+                st.write(book_data.get('description', 'No description available.'))
+            
+            if score:
+                st.progress(score)
+                st.caption(f"Relevance: {int(score*100)}%")
+            
+            # Actions
+            c1, c2 = st.columns(2)
+            with c1:
+                # Toggle Bookmark
+                is_bookmarked = book_data['id'] in st.session_state.bookmarks
+                btn_label = "❌ Remove Bookmark" if is_bookmarked else "🔖 Bookmark"
+                if st.button(btn_label, key=f"bk_{book_data['id']}"):
+                    if is_bookmarked:
+                        st.session_state.bookmarks.remove(book_data['id'])
+                    else:
+                        st.session_state.bookmarks.append(book_data['id'])
+                    st.rerun()
 
 def search_page():
-    """Main search page"""
-    st.title("🎵 MelodyMatch AI")
-    st.subheader("Discover Your Next Favorite Song")
+    """Main Search Interface"""
+    st.title("📚 PageTurner AI")
+    st.markdown("_Your intelligent literary companion_")
     
-    # Search section
-    col1, col2 = st.columns([3, 1])
-    
-    with col1:
-        search_query = st.text_input(
-            "Search for songs, artists, or describe a mood...",
-            placeholder="e.g., 'upbeat electronic music' or 'sad piano ballad'",
-            key="search_input"
-        )
-    
-    with col2:
-        search_type = st.selectbox(
-            "Search Type",
-            ["All", "By Name", "By Genre", "By Mood"]
-        )
-    
-    # Genre filter
-    if st.session_state.recommender:
-        genres = st.session_state.recommender.get_available_genres()
-        selected_genres = st.multiselect(
-            "Filter by Genre",
-            genres,
-            default=None
-        )
-    
-    # Advanced filters
-    with st.expander("⚙️ Advanced Filters"):
-        col1, col2, col3 = st.columns(3)
-        
+    # Search Bar
+    with st.container():
+        col1, col2 = st.columns([3, 1])
         with col1:
-            tempo_range = st.slider("Tempo (BPM)", 60, 200, (80, 160))
-        
+            query = st.text_input("What are you looking for?", placeholder="Search by title, author, or topic...", key="search_query")
         with col2:
-            energy_level = st.slider("Energy Level", 0.0, 1.0, (0.0, 1.0))
-        
-        with col3:
-            valence = st.slider("Mood (Valence)", 0.0, 1.0, (0.0, 1.0))
+            sort_by = st.selectbox("Sort By", ["Relevance", "Rating", "Newest"])
     
-    # Search button
-    if st.button("🔍 Search", type="primary"):
-        if search_query or selected_genres:
-            with st.spinner("Searching through 25,000+ tracks..."):
-                results = st.session_state.recommender.search(
-                    query=search_query,
-                    genres=selected_genres,
-                    tempo_range=tempo_range,
-                    energy_range=energy_level,
-                    valence_range=valence,
-                    k=20
-                )
-                
-                if results:
-                    st.success(f"Found {len(results)} matching songs!")
-                    
-                    # Display results
-                    for i, (song_data, score) in enumerate(results):
-                        with st.container():
-                            st.markdown(f"#### {i+1}. Result")
-                            display_song_card(song_data, score)
-                            st.divider()
-                else:
-                    st.warning("No results found. Try different search terms!")
-        else:
-            st.warning("Please enter a search query or select a genre")
-
-def recommendations_page():
-    """Recommendations based on current song or favorites"""
-    st.title("🎯 Personalized Recommendations")
+    # Filters
+    with st.expander("⚙️ Refine Criteria", expanded=False):
+        c1, c2, c3 = st.columns(3)
+        with c1:
+            genres = st.session_state.recommender.get_available_genres()
+            selected_genres = st.multiselect("Genres", genres)
+        with c2:
+            rating_range = st.slider("Min Rating", 1.0, 5.0, (3.5, 5.0))
+        with c3:
+            pages_range = st.slider("Page Count", 0, 1000, (100, 800))
     
-    # Recommendation sources
-    rec_source = st.radio(
-        "Get recommendations based on:",
-        ["Current Song", "My Favorites", "Genre Mix", "Upload Audio"]
-    )
+    # Search Action
+    if st.button("🔍 Find Books", type="primary") or (query and not st.session_state.search_results):
+        with st.spinner("Curating your reading list..."):
+            results = st.session_state.recommender.search(
+                query=query,
+                genres=selected_genres,
+                rating_range=rating_range,
+                pages_range=pages_range,
+                k=15
+            )
+            st.session_state.search_results = results
+            if query:
+                st.session_state.search_history.append({"query": query, "time": time.time()})
     
-    if rec_source == "Current Song" and st.session_state.current_song:
-        st.subheader(f"Songs similar to: {st.session_state.current_song['title']}")
-        
-        num_recs = st.slider("Number of recommendations", 5, 50, 10)
-        
-        if st.button("🎲 Get Recommendations"):
-            with st.spinner("Finding similar songs..."):
-                recs = st.session_state.recommender.get_similar_songs(
-                    st.session_state.current_song['id'],
-                    k=num_recs
-                )
-                
-                for i, (song_data, score) in enumerate(recs):
-                    with st.container():
-                        st.markdown(f"#### {i+1}. Recommendation")
-                        display_song_card(song_data, score)
-                        st.divider()
-    
-    elif rec_source == "My Favorites":
-        if not st.session_state.favorites:
-            st.info("❤️ You haven't liked any songs yet! Start exploring to build your taste profile.")
-        else:
-            st.subheader(f"Based on your {len(st.session_state.favorites)} favorite songs")
-            
-            num_recs = st.slider("Number of recommendations", 5, 50, 10)
-            
-            if st.button("🎲 Get Recommendations"):
-                with st.spinner("Analyzing your taste..."):
-                    recs = st.session_state.recommender.get_recommendations_from_favorites(
-                        st.session_state.favorites,
-                        k=num_recs
-                    )
-                    
-                    for i, (song_data, score) in enumerate(recs):
-                        with st.container():
-                            st.markdown(f"#### {i+1}. Recommendation")
-                            display_song_card(song_data, score)
-                            st.divider()
-    
-    elif rec_source == "Genre Mix":
-        st.subheader("Create a custom genre mix")
-        
-        genres = st.session_state.recommender.get_available_genres()
-        selected_genres = st.multiselect(
-            "Select genres to mix",
-            genres,
-            max_selections=3
-        )
-        
-        num_recs = st.slider("Number of recommendations", 5, 50, 10)
-        
-        if st.button("🎲 Generate Playlist") and selected_genres:
-            with st.spinner("Creating your mix..."):
-                recs = st.session_state.recommender.get_genre_mix(
-                    selected_genres,
-                    k=num_recs
-                )
-                
-                for i, (song_data, score) in enumerate(recs):
-                    with st.container():
-                        st.markdown(f"#### {i+1}. Track")
-                        display_song_card(song_data, score)
-                        st.divider()
-    
-    elif rec_source == "Upload Audio":
-        st.subheader("Upload your own audio file")
-        st.info("🎵 Upload a song and we'll find similar tracks!")
-        
-        uploaded_file = st.file_uploader(
-            "Choose an audio file",
-            type=['mp3', 'wav', 'ogg', 'flac']
-        )
-        
-        if uploaded_file is not None:
-            st.audio(uploaded_file)
-            
-            if st.button("🔍 Find Similar Songs"):
-                with st.spinner("Analyzing audio and searching..."):
-                    # Process uploaded audio
-                    processor = AudioProcessor()
-                    features = processor.extract_features_from_file(uploaded_file)
-                    
-                    # Get recommendations
-                    recs = st.session_state.recommender.get_similar_by_features(
-                        features,
-                        k=10
-                    )
-                    
-                    st.success(f"Found {len(recs)} similar songs!")
-                    
-                    for i, (song_data, score) in enumerate(recs):
-                        with st.container():
-                            st.markdown(f"#### {i+1}. Similar Track")
-                            display_song_card(song_data, score)
-                            st.divider()
+    # Results Display
+    st.divider()
+    if st.session_state.search_results:
+        st.markdown(f"**Found {len(st.session_state.search_results)} books matching your criteria**")
+        for book, score in st.session_state.search_results:
+            display_book_card(book, score)
+            st.divider()
 
 def analytics_page():
     """Analytics and visualizations"""
@@ -406,122 +296,63 @@ def analytics_page():
             history_df = pd.DataFrame(st.session_state.search_history)
             st.dataframe(history_df, use_container_width=True)
 
-def settings_page():
-    """Settings and database management"""
-    st.title("⚙️ Settings & Database")
+def dashboard_page():
+    """Analytics Dashboard"""
+    st.title("📊 Literary Analytics")
     
-    # Database stats
-    st.subheader("📊 Database Statistics")
-    if st.session_state.db_manager:
-        stats = st.session_state.db_manager.get_detailed_stats()
-        
-        col1, col2, col3 = st.columns(3)
-        
-        with col1:
-            st.metric("Total Vectors", f"{stats['vector_count']:,}")
-            st.metric("Memory Usage", f"{stats['memory_mb']:.2f} MB")
-        
-        with col2:
-            st.metric("Search Mode", stats['mode'])
-            st.metric("Dimension", stats['dimension'])
-        
-        with col3:
-            st.metric("Compression", f"{stats['compression_ratio']:.1f}x")
-            st.metric("Avg Query Time", f"{stats['avg_query_ms']:.2f} ms")
-    
-    st.divider()
-    
-    # Database management
-    st.subheader("🔧 Database Management")
+    stats = st.session_state.recommender.get_genre_distribution()
     
     col1, col2 = st.columns(2)
     
     with col1:
-        if st.button("🔄 Rebuild Database"):
-            st.warning("This will reprocess all audio files. Continue?")
-            if st.button("✅ Yes, Rebuild"):
-                with st.spinner("Rebuilding database..."):
-                    # Rebuild logic here
-                    pass
-    
+        st.subheader("Collection Composition")
+        fig = px.pie(
+            values=list(stats.values()),
+            names=list(stats.keys()),
+            color_discrete_sequence=px.colors.sequential.RdBu,
+            hole=0.4
+        )
+        fig.update_layout(paper_bgcolor='rgba(0,0,0,0)')
+        st.plotly_chart(fig, use_container_width=True)
+        
     with col2:
-        if st.button("💾 Export Data"):
-            # Export functionality
-            st.download_button(
-                label="Download as CSV",
-                data="",  # CSV data
-                file_name="music_data.csv",
-                mime="text/csv"
-            )
-    
-    st.divider()
-    
-    # Performance tuning
-    st.subheader("⚡ Performance Tuning")
-    
-    search_mode = st.selectbox(
-        "Vector Search Mode",
-        ["HNSW (Fast)", "Flat (Accurate)", "Auto"],
-        help="HNSW for speed, Flat for accuracy"
-    )
-    
-    cache_size = st.slider("Cache Size (MB)", 50, 500, 100)
-    
-    if st.button("Apply Settings"):
-        st.success("Settings applied!")
+        st.subheader("Library Stats")
+        st.markdown(f"""
+        <div class="metric-container">
+            <div class="metric-value">{sum(stats.values())}</div>
+            <div class="metric-label">Total Books</div>
+        </div>
+        <br>
+        <div class="metric-container">
+            <div class="metric-value">{len(stats)}</div>
+            <div class="metric-label">Unique Genres</div>
+        </div>
+        """, unsafe_allow_html=True)
 
 def main():
-    """Main application"""
-    
-    # Sidebar
-    with st.sidebar:
-        st.image("https://via.placeholder.com/150x150/667eea/ffffff?text=🎵", use_container_width=True)
-        st.title("MelodyMatch AI")
-        st.caption("Powered by SrvDB")
-        
-        st.divider()
-        
-        # Navigation
-        page = st.radio(
-            "Navigation",
-            ["🔍 Search", "🎯 Recommendations", "📊 Analytics", "⚙️ Settings"]
-        )
-        
-        st.divider()
-        
-        # Quick stats
-        st.subheader("Quick Stats")
-        if st.session_state.db_manager:
-            display_metrics()
-        
-        st.divider()
-        
-        # About
-        with st.expander("ℹ️ About"):
-            st.markdown("""
-            **MelodyMatch AI** is a music recommendation system using:
-            - 🎵 25,000+ songs from FMA dataset
-            - 🚀 SrvDB vector database
-            - 🤖 Advanced audio analysis
-            - 💨 Sub-100ms recommendations
+    if init_system():
+        # Sidebar Navigation
+        with st.sidebar:
+            st.title("PageTurner AI")
+            page = st.radio("Navigation", ["Search", "Dashboard", "My Bookmarks"])
             
-            Built for educational purposes.
-            """)
-    
-    # Initialize system
-    if st.session_state.db_manager is None:
-        if not init_system():
-            return
-    
-    # Route to pages
-    if page == "🔍 Search":
-        search_page()
-    elif page == "🎯 Recommendations":
-        recommendations_page()
-    elif page == "📊 Analytics":
-        analytics_page()
-    elif page == "⚙️ Settings":
-        settings_page()
+            st.divider()
+            st.markdown("### About")
+            st.info("Powered by SrvDB Vector Database.\nDiscover your next great read.")
+
+        if page == "Search":
+            search_page()
+        elif page == "Dashboard":
+            dashboard_page()
+        elif page == "My Bookmarks":
+            st.title("🔖 My Bookmarks")
+            if st.session_state.bookmarks:
+                st.write("Your bookmarked books will appear here.")
+                # Simple list for now as full retrieval needs ID lookup
+                for i, book_id in enumerate(st.session_state.bookmarks):
+                    st.markdown(f"{i+1}. **{book_id}** (Full details require ID lookup)")
+            else:
+                st.write("You haven't bookmarked any books yet.")
 
 if __name__ == "__main__":
     main()

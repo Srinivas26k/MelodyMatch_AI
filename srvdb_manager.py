@@ -40,6 +40,9 @@ class SrvDBManager:
         self.metadata_cache = {}
         self.query_times = []
         
+        # Try to load cache immediately
+        self.load_metadata_cache()
+        
         print(f"✅ Database initialized with {self.db.count()} vectors")
     
     def add_songs(self, 
@@ -83,6 +86,9 @@ class SrvDBManager:
         # Update metadata cache
         for song_id, meta in zip(ids, metadata):
             self.metadata_cache[song_id] = meta
+            
+        # Save metadata cache to disk
+        self.save_metadata_cache()
         
         # Persist to disk
         self.db.persist()
@@ -295,11 +301,14 @@ class SrvDBManager:
             filepath = self.db_path / "metadata_cache.json"
         
         if Path(filepath).exists():
-            with open(filepath, 'r') as f:
-                self.metadata_cache = json.load(f)
-            print(f"📂 Loaded {len(self.metadata_cache)} metadata entries from cache")
+            try:
+                with open(filepath, 'r') as f:
+                    self.metadata_cache = json.load(f)
+                print(f"📂 Loaded {len(self.metadata_cache)} metadata entries from cache")
+            except Exception as e:
+                print(f"⚠️ Failed to load metadata cache: {e}")
         else:
-            print("⚠️ No metadata cache found")
+            print("ℹ️ No metadata cache found - starting fresh")
     
     def export_database(self, output_path: str):
         """Export database to JSON for analysis"""
