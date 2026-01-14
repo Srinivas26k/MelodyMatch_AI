@@ -146,6 +146,107 @@ class BookRecommender:
             genre_counts[genre] += 1
         return dict(genre_counts)
 
+    def search_external(self, query: str, k: int = 5) -> List[Tuple[Dict, float]]:
+        """
+        Search for books using OpenLibrary API (Fallback)
+        """
+        import requests
+        
+        results = []
+        try:
+            # OpenLibrary Search API
+            url = f"https://openlibrary.org/search.json?q={query}&limit={k}"
+            response = requests.get(url, timeout=5)
+            
+            if response.status_code == 200:
+                data = response.json()
+                
+                for doc in data.get('docs', []):
+                    # Extract fields
+                    title = doc.get('title', 'Unknown Title')
+                    author = doc.get('author_name', ['Unknown Author'])[0]
+                    # Genre/Subjects
+                    subjects = doc.get('subject', [])
+                    genre = subjects[0] if subjects else "General"
+                    
+                    # Year
+                    year = doc.get('first_publish_year', None)
+                    
+                    # Pages (estimate if missing)
+                    pages = doc.get('number_of_pages_median', 300)
+                    
+                    # Cover
+                    cover_i = doc.get('cover_i')
+                    if cover_i:
+                        cover_url = f"https://covers.openlibrary.org/b/id/{cover_i}-M.jpg"
+                    else:
+                        cover_url = "https://via.placeholder.com/150x200?text=No+Cover"
+                    
+                    # Create metadata dict matching our internal format
+                    book_data = {
+                        'id': f"ol_{doc.get('key', '').split('/')[-1]}", # Use OL key as unique ID
+                        'title': title,
+                        'author': author,
+                        'genre': genre,
+                        'rating': 4.0, # Default rating for external books
+                        'pages': pages,
+                        'year': year,
+                        'description': f"Retrieved from OpenLibrary. First published in {year}.",
+                        'cover_url': cover_url,
+                        'external': True
+                    }
+                    
+                    # Relevance score (from API order)
+                    results.append((book_data, 0.9))
+        
+        except Exception as e:
+            print(f"External API Error: {e}")
+            
+        return results
+
+    def get_book(self, book_id: str) -> Optional[Dict]:
+        """Get metadata for a single book by ID"""
+        # First check cache
+        if book_id in self.db.metadata_cache:
+            return self.db.metadata_cache[book_id]
+        
+        # If not in cache (rare if cache is consistent), try DB retrieval if supported
+        # For now, rely on cache
+        return None
+
+    def add_external_book(self, book_data: Dict) -> bool:
+        """
+        Add an external book to the local database (Lazy Indexing)
+        Generates a synthetic embedding based on genre/metadata
+        """
+        # Check if already exists
+        if book_data['id'] in self.db.metadata_cache:
+            return True
+            
+        try:
+            # Generate synthetic embedding (128D) similar to generator
+            genre = book_data.get('genre', 'General')
+            vector = np.random.randn(128)
+            
+            # Simple genre bias (deterministic based on genre name to keep it semi-consistent)
+            genre_hash = sum(ord(c) for c in genre)
+            vector[genre_hash % 10] += 1.5 
+            vector[(genre_hash + 1) % 10] += 0.5
+            
+            # Normalize
+            vector = vector / np.linalg.norm(vector)
+            
+            # Ensure ID is set
+            if 'id' not in book_data:
+                return False
+                
+            # Add to DB
+            self.db.add_books([vector], [book_data])
+            return True
+        except Exception as e:
+            print(f"Error adding external book: {e}")
+            return False
+
 
 # Example usage
 if __name__ == "__main__":

@@ -1,6 +1,6 @@
 """
 SrvDB Manager - Interface for vector database operations
-Handles all interactions with SrvDB for music recommendation system
+Handles all interactions with SrvDB for book recommendation system
 """
 
 import srvdb
@@ -12,7 +12,7 @@ from typing import List, Dict, Tuple, Optional
 
 
 class SrvDBManager:
-    """Manages SrvDB vector database for music embeddings"""
+    """Manages SrvDB vector database for book embeddings"""
     
     def __init__(self, db_path: str = "./db/music_vectors", dimension: int = 128):
         """
@@ -45,18 +45,18 @@ class SrvDBManager:
         
         print(f"✅ Database initialized with {self.db.count()} vectors")
     
-    def add_songs(self, 
+    def add_books(self, 
                   embeddings: List[np.ndarray], 
                   metadata: List[Dict]) -> List[str]:
         """
-        Add songs to the database
+        Add books to the database
         
         Args:
-            embeddings: List of audio feature vectors
-            metadata: List of song metadata dictionaries
+            embeddings: List of book feature vectors
+            metadata: List of book metadata dictionaries
         
         Returns:
-            List of song IDs
+            List of book IDs
         """
         if len(embeddings) != len(metadata):
             raise ValueError("Embeddings and metadata must have same length")
@@ -71,7 +71,7 @@ class SrvDBManager:
         metadata_json = [json.dumps(meta) for meta in metadata]
         
         # Batch insert
-        print(f"📝 Adding {len(ids)} songs to database...")
+        print(f"📝 Adding {len(ids)} books to database...")
         start_time = time.time()
         
         self.db.add(
@@ -81,11 +81,11 @@ class SrvDBManager:
         )
         
         elapsed = time.time() - start_time
-        print(f"✅ Added {len(ids)} songs in {elapsed:.2f}s ({len(ids)/elapsed:.0f} songs/s)")
+        print(f"✅ Added {len(ids)} books in {elapsed:.2f}s ({len(ids)/elapsed:.0f} books/s)")
         
         # Update metadata cache
-        for song_id, meta in zip(ids, metadata):
-            self.metadata_cache[song_id] = meta
+        for book_id, meta in zip(ids, metadata):
+            self.metadata_cache[book_id] = meta
             
         # Save metadata cache to disk
         self.save_metadata_cache()

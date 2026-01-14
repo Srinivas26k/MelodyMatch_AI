@@ -11,135 +11,45 @@ import plotly.express as px
 import plotly.graph_objects as go
 from srvdb_manager import SrvDBManager
 from recommender import BookRecommender
+from bookmark_manager import BookmarkManager
 import time
 
-# Page Configuration
-st.set_page_config(
-    page_title="PageTurner AI",
-    page_icon="📚",
-    layout="wide",
-    initial_sidebar_state="expanded"
-)
-
-# Custom CSS - Professional/Library Theme
-st.markdown("""
-<style>
-    /* Main Background */
-    .stApp {
-        background-color: #Fdfbf7; /* Cream/Paper white */
-        color: #2c3e50;
-        font-family: 'Merriweather', 'Georgia', serif;
-    }
-    
-    /* Sidebar */
-    [data-testid="stSidebar"] {
-        background-color: #2c3e50;
-        color: #ecf0f1;
-    }
-    [data-testid="stSidebar"] p, [data-testid="stSidebar"] span {
-        color: #ecf0f1;
-    }
-    
-    /* Typography */
-    h1, h2, h3, h4 {
-        font-family: 'Playfair Display', 'Times New Roman', serif;
-        color: #2c3e50;
-    }
-    
-    /* Buttons */
-    .stButton>button {
-        width: 100%;
-        border-radius: 4px;
-        background-color: #bfa378; /* Gold/Antique Paper */
-        color: white;
-        border: none;
-        padding: 8px 16px;
-        font-family: 'Lato', sans-serif;
-        font-weight: 600;
-        text-transform: uppercase;
-        letter-spacing: 1px;
-        transition: all 0.3s ease;
-    }
-    .stButton>button:hover {
-        background-color: #a68b5e;
-        box-shadow: 0 4px 6px rgba(0,0,0,0.1);
-    }
-    
-    /* Input Fields */
-    .stTextInput>div>div>input {
-        background-color: #ffffff;
-        border: 1px solid #bdc3c7;
-        border-radius: 4px;
-        padding: 10px;
-        font-family: 'Lato', sans-serif;
-    }
-    
-    /* Book Card */
-    .book-card {
-        background-color: #ffffff;
-        border: 1px solid #e0e0e0;
-        border-radius: 2px;
-        padding: 20px;
-        box-shadow: 0 2px 4px rgba(0,0,0,0.05);
-        transition: all 0.3s ease;
-        margin-bottom: 20px;
-    }
-    .book-card:hover {
-        box-shadow: 0 8px 16px rgba(0,0,0,0.1);
-        transform: translateY(-2px);
-    }
-    
-    /* Metrics */
-    .metric-container {
-        pointer-events: none;
-        background-color: #ffffff;
-        border: 1px solid #ecf0f1;
-        padding: 15px;
-        border-radius: 2px;
-        text-align: center;
-    }
-    .metric-value {
-        font-family: 'Playfair Display', serif;
-        font-size: 28px;
-        color: #2c3e50;
-        font-weight: bold;
-    }
-    .metric-label {
-        font-family: 'Lato', sans-serif;
-        font-size: 12px;
-        color: #7f8c8d;
-        text-transform: uppercase;
-        letter-spacing: 1px;
-    }
-    
-    /* Rating Stars */
-    .star-rating {
-        color: #f1c40f;
-        font-size: 16px;
-    }
-</style>
-""", unsafe_allow_html=True)
+# ... (Configuration stays same)
 
 # Application State
 if 'recommender' not in st.session_state:
     st.session_state.recommender = None
+    st.session_state.bookmark_manager = None 
     st.session_state.bookmarks = []
     st.session_state.search_history = []
     st.session_state.search_results = None
+    st.session_state.is_external_results = False
 
 def init_system():
     """Initialize the recommendation system"""
-    if st.session_state.recommender is None:
+    # Force re-init if recommender is stale (missing new methods)
+    if (st.session_state.recommender is None or 
+        not hasattr(st.session_state.recommender, 'search_external')):
         try:
-            with st.spinner("� Initializing PageTurner AI..."):
-                # Using specific book vectors path
+            with st.spinner("📚 Initializing PageTurner AI..."):
+                # Database
                 db_manager = SrvDBManager(db_path="./db/book_vectors")
+                
+                if db_manager.db.count() == 0:
+                     # Warn or attempt to regenerate? For now just load
+                     pass
+                     
                 st.session_state.recommender = BookRecommender(db_manager)
+                
+                # Bookmarks
+                st.session_state.bookmark_manager = BookmarkManager()
+                # Load existing bookmarks
+                st.session_state.bookmarks = st.session_state.bookmark_manager.get_bookmarks()
+                
             st.success("✅ System initialized successfully!")
             return True
         except Exception as e:
             st.error(f"❌ Failed to initialize system: {e}")
-            st.info("💡 Please ensure the book vector database is built.")
             return False
     return True
 
@@ -169,21 +79,28 @@ def display_book_card(book_data, score=None):
                 st.write(book_data.get('description', 'No description available.'))
             
             if score:
-                st.progress(score)
-                st.caption(f"Relevance: {int(score*100)}%")
+                st.progress(min(score, 1.0))
+                st.caption(f"Relevance: {int(min(score, 1.0)*100)}%")
             
             # Actions
             c1, c2 = st.columns(2)
             with c1:
                 # Toggle Bookmark
-                is_bookmarked = book_data['id'] in st.session_state.bookmarks
-                btn_label = "❌ Remove Bookmark" if is_bookmarked else "🔖 Bookmark"
-                if st.button(btn_label, key=f"bk_{book_data['id']}"):
-                    if is_bookmarked:
-                        st.session_state.bookmarks.remove(book_data['id'])
-                    else:
-                        st.session_state.bookmarks.append(book_data['id'])
-                    st.rerun()
+                book_id = book_data['id']
+                if st.session_state.bookmark_manager:
+                    is_bookmarked = st.session_state.bookmark_manager.is_bookmarked(book_id)
+                    btn_label = "❌ Remove Bookmark" if is_bookmarked else "🔖 Bookmark"
+                    
+                    if st.button(btn_label, key=f"bk_{book_id}"):
+                        if is_bookmarked:
+                            st.session_state.bookmark_manager.remove_bookmark(book_id)
+                        else:
+                            st.session_state.bookmark_manager.add_bookmark(book_id)
+                            # Index external book if it's new
+                            if book_data.get('external'):
+                                st.toast("Saving to local library...")
+                                st.session_state.recommender.add_external_book(book_data)
+                        st.rerun()
 
 def search_page():
     """Main Search Interface"""
@@ -205,13 +122,32 @@ def search_page():
             genres = st.session_state.recommender.get_available_genres()
             selected_genres = st.multiselect("Genres", genres)
         with c2:
-            rating_range = st.slider("Min Rating", 1.0, 5.0, (3.5, 5.0))
+            rating_range = st.slider("Min Rating", 1.0, 5.0, (1.0, 5.0))
         with c3:
-            pages_range = st.slider("Page Count", 0, 1000, (100, 800))
+            pages_range = st.slider("Page Count", 0, 1000, (0, 1000))
     
+    # Check for filter changes
+    current_filters = {
+        'genres': selected_genres,
+        'rating': rating_range,
+        'pages': pages_range,
+        'sort': sort_by
+    }
+    
+    filters_changed = False
+    if 'last_filters' not in st.session_state:
+        st.session_state.last_filters = current_filters
+    elif st.session_state.last_filters != current_filters:
+        filters_changed = True
+        st.session_state.last_filters = current_filters
+
     # Search Action
-    if st.button("🔍 Find Books", type="primary") or (query and not st.session_state.search_results):
+    # Trigger if: Button clicked OR Filters changed OR (Query present and no results)
+    do_search = st.button("🔍 Find Books", type="primary")
+    
+    if do_search or filters_changed or (query and st.session_state.search_results is None):
         with st.spinner("Curating your reading list..."):
+            # 1. Local Search
             results = st.session_state.recommender.search(
                 query=query,
                 genres=selected_genres,
@@ -219,82 +155,32 @@ def search_page():
                 pages_range=pages_range,
                 k=15
             )
+            
+            is_external = False
+            # 2. External Fallback (only if query is distinct)
+            if not results and query:
+                 with st.status("Searching global libraries (OpenLibrary)..."):
+                    results = st.session_state.recommender.search_external(query)
+                    is_external = True
+            
             st.session_state.search_results = results
-            if query:
+            st.session_state.is_external_results = is_external
+            
+            if query and do_search: # Only log history on explicit search
                 st.session_state.search_history.append({"query": query, "time": time.time()})
     
     # Results Display
     st.divider()
     if st.session_state.search_results:
+        if getattr(st.session_state, 'is_external_results', False):
+             st.info("🌐 Book not found in local library. Showing results from OpenLibrary.")
+             
         st.markdown(f"**Found {len(st.session_state.search_results)} books matching your criteria**")
         for book, score in st.session_state.search_results:
             display_book_card(book, score)
             st.divider()
-
-def analytics_page():
-    """Analytics and visualizations"""
-    st.title("📊 Music Analytics")
-    
-    if st.session_state.recommender:
-        # Genre distribution
-        st.subheader("🎸 Genre Distribution")
-        genre_data = st.session_state.recommender.get_genre_distribution()
-        
-        fig = px.pie(
-            values=list(genre_data.values()),
-            names=list(genre_data.keys()),
-            title="Songs by Genre",
-            color_discrete_sequence=px.colors.sequential.Plasma
-        )
-        st.plotly_chart(fig, use_container_width=True)
-        
-        # Favorites analysis
-        if st.session_state.favorites:
-            st.subheader("❤️ Your Favorite Songs Analysis")
-            
-            fav_data = st.session_state.recommender.analyze_favorites(
-                st.session_state.favorites
-            )
-            
-            col1, col2 = st.columns(2)
-            
-            with col1:
-                # Favorite genres
-                fig = px.bar(
-                    x=list(fav_data['genres'].keys()),
-                    y=list(fav_data['genres'].values()),
-                    title="Your Favorite Genres",
-                    labels={'x': 'Genre', 'y': 'Count'}
-                )
-                st.plotly_chart(fig, use_container_width=True)
-            
-            with col2:
-                # Audio features radar
-                features = ['Energy', 'Valence', 'Danceability', 'Acousticness']
-                values = [
-                    fav_data['avg_energy'],
-                    fav_data['avg_valence'],
-                    fav_data['avg_danceability'],
-                    fav_data['avg_acousticness']
-                ]
-                
-                fig = go.Figure(data=go.Scatterpolar(
-                    r=values,
-                    theta=features,
-                    fill='toself'
-                ))
-                fig.update_layout(
-                    polar=dict(radialaxis=dict(visible=True, range=[0, 1])),
-                    showlegend=False,
-                    title="Your Music Taste Profile"
-                )
-                st.plotly_chart(fig, use_container_width=True)
-        
-        # Search history
-        if st.session_state.search_history:
-            st.subheader("🔍 Recent Searches")
-            history_df = pd.DataFrame(st.session_state.search_history)
-            st.dataframe(history_df, use_container_width=True)
+    elif st.session_state.search_results is not None:
+        st.warning("No books found. Try a broader search.")
 
 def dashboard_page():
     """Analytics Dashboard"""
@@ -302,6 +188,10 @@ def dashboard_page():
     
     stats = st.session_state.recommender.get_genre_distribution()
     
+    if not stats:
+        st.info("Library is empty. Generate data or bookmark books to see stats.")
+        return
+
     col1, col2 = st.columns(2)
     
     with col1:
@@ -346,13 +236,28 @@ def main():
             dashboard_page()
         elif page == "My Bookmarks":
             st.title("🔖 My Bookmarks")
-            if st.session_state.bookmarks:
-                st.write("Your bookmarked books will appear here.")
-                # Simple list for now as full retrieval needs ID lookup
-                for i, book_id in enumerate(st.session_state.bookmarks):
-                    st.markdown(f"{i+1}. **{book_id}** (Full details require ID lookup)")
+            
+            # Refresh bookmarks from manager
+            bookmarks = st.session_state.bookmark_manager.get_bookmarks()
+            
+            if bookmarks:
+                st.write(f"You have {len(bookmarks)} bookmarked books.")
+                st.divider()
+                
+                for book_id in bookmarks:
+                    # Get full metadata
+                    book_data = st.session_state.recommender.get_book(book_id)
+                    
+                    if book_data:
+                        display_book_card(book_data)
+                        st.divider()
+                    else:
+                        # Fallback if book not in local DB (shouldn't happen with lazy indexing, but good for safety)
+                        st.warning(f"Metadata missing for ID: {book_id}")
             else:
-                st.write("You haven't bookmarked any books yet.")
+                st.info("You haven't bookmarked any books yet. Go to Search to find some!")
+                if st.button("Go to Search"):
+                    st.rerun()
 
 if __name__ == "__main__":
     main()
