@@ -1,0 +1,9 @@
+streamlit
+pandas
+numpy
+plotly
+requests
+# srvdb is a custom package, assuming it's available or bundled. 
+# If srvdb is local only, we might need to handle it differently for cloud. 
+# For now, listing it as a requirement.
+srvdb

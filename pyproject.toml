@@ -1,5 +1,5 @@
 [project]
-name = "melodymatch-ai"
+name = "PageTurner_AI"
 version = "0.1.0"
 description = "state-of-the-art music recommendation system powered by **SrvDB Vector Database**"
 readme = "README.md"
