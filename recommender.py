@@ -1,6 +1,6 @@
 """
-Book Recommendation Engine
-Implements various recommendation strategies using SrvDB
+Media Recommendation Engine
+Implements various recommendation strategies using SrvDB for Books, Music, and Movies.
 """
 
 import numpy as np
@@ -8,98 +8,103 @@ from typing import List, Dict, Tuple, Optional
 from collections import Counter
 import random
 
-
-class BookRecommender:
-    """Book recommendation engine powered by SrvDB"""
+class MediaRecommender:
+    """Generic media recommendation engine powered by SrvDB"""
     
-    def __init__(self, db_manager):
+    def __init__(self, db_manager, media_type: str = "book"):
         """
         Initialize recommender
         
         Args:
             db_manager: SrvDBManager instance
+            media_type: Type of media ('book', 'music', 'movie')
         """
         self.db = db_manager
+        self.media_type = media_type
         
-    def get_similar_books(self, 
-                         book_id: str, 
+    def get_similar_items(self, 
+                         item_id: str, 
                          k: int = 10) -> List[Tuple[Dict, float]]:
-        """Get books similar to a given book"""
-        results = self.db.search_by_id(book_id, k=k)
+        """Get items similar to a given item"""
+        results = self.db.search_by_id(item_id, k=k)
         return [(meta, score) for _, score, meta in results]
     
     def search(self,
                query: str = None,
                genres: List[str] = None,
                rating_range: Tuple[float, float] = None,
-               pages_range: Tuple[int, int] = None,
+               secondary_range: Tuple[int, int] = None, # pages or duration or year
                k: int = 20) -> List[Tuple[Dict, float]]:
         """
-        Multi-criteria book search
+        Multi-criteria search
         
         Args:
-            query: Text search query (title, author, genre)
+            query: Text search query
             genres: List of genres to filter
-            rating_range: (min, max) rating (0-5)
-            pages_range: (min, max) page count
+            rating_range: (min, max) rating
+            secondary_range: (min, max) for pages/duration/year depending on type
             k: Number of results
         
         Returns:
-            List of (book_metadata, relevance_score) tuples
+            List of (metadata, relevance_score) tuples
         """
-        # Start with all books or genre-filtered
+        # Start with all items or genre-filtered
         candidates = []
         
         if genres:
-            # Get books from selected genres
+            # Get items from selected genres
             for genre in genres:
-                genre_books = self.db.get_by_genre(genre, k=1000)
-                candidates.extend(genre_books)
+                genre_items = self.db.get_by_genre(genre, k=1000)
+                candidates.extend(genre_items)
         else:
-            # Get all books from cache
+            # Get all items from cache
             candidates = list(self.db.metadata_cache.values())
         
         # Text search filtering
         if query:
             query_lower = query.lower()
             candidates = [
-                book for book in candidates
-                if query_lower in book.get('title', '').lower() or
-                   query_lower in book.get('author', '').lower() or
-                   query_lower in book.get('genre', '').lower()
+                item for item in candidates
+                if query_lower in item.get('title', '').lower() or
+                   query_lower in item.get('author', '').lower() or
+                   query_lower in item.get('artist', '').lower() or
+                   query_lower in item.get('director', '').lower() or
+                   query_lower in item.get('genre', '').lower()
             ]
         
         # Apply filters
         if rating_range:
             candidates = [
-                book for book in candidates
-                if 'rating' in book and rating_range[0] <= book['rating'] <= rating_range[1]
+                item for item in candidates
+                if 'rating' in item and rating_range[0] <= item['rating'] <= rating_range[1]
             ]
             
-        if pages_range:
+        if secondary_range:
+            key = 'pages' if self.media_type == 'book' else 'year' # Simplified for now, can be duration
             candidates = [
-                book for book in candidates
-                if 'pages' in book and pages_range[0] <= book['pages'] <= pages_range[1]
+                item for item in candidates
+                if key in item and secondary_range[0] <= item[key] <= secondary_range[1]
             ]
         
         # Score candidates
         scored_candidates = []
-        for book in candidates[:k*3]:  # Consider more for ranking
+        for item in candidates[:k*3]:  # Consider more for ranking
             # Base score
             score = 0.8
             
             # Boost exact matches
             if query:
-                if query.lower() in book.get('title', '').lower():
+                q = query.lower()
+                if q in item.get('title', '').lower():
                     score += 0.2
-                if query.lower() in book.get('author', '').lower():
+                if q in item.get('author', '').lower() or q in item.get('artist', '').lower() or q in item.get('director', '').lower():
                     score += 0.15
             
             # Boost high ratings
-            if 'rating' in book:
-                score += (book['rating'] - 3.0) * 0.05
+            if 'rating' in item:
+                score += (item['rating'] - 3.0) * 0.05
             
-            scored_candidates.append((book, score))
+            scored_candidates.append((item, score))
         
         # Sort by score
         scored_candidates.sort(key=lambda x: x[1], reverse=True)
@@ -108,16 +113,19 @@ class BookRecommender:
     def get_recommendations_from_favorites(self,
                                           favorite_ids: List[str],
                                           k: int = 10) -> List[Tuple[Dict, float]]:
-        """Get recommendations based on favorite books"""
+        """Get recommendations based on favorite items"""
         if not favorite_ids:
             return []
         
         # Get embeddings for favorites
         favorite_embeddings = []
-        for book_id in favorite_ids:
-            metadata = self.db._get_metadata(book_id)
+        valid_ids = []
+        for item_id in favorite_ids:
+            # Validate metadata exists in this DB instance
+            metadata = self.db._get_metadata(item_id)
             if metadata and 'embedding' in metadata:
                 favorite_embeddings.append(np.array(metadata['embedding']))
+                valid_ids.append(item_id)
         
         if not favorite_embeddings:
             return []
@@ -129,7 +137,7 @@ class BookRecommender:
         results = self.db.search_similar(
             centroid,
             k=k,
-            exclude_ids=favorite_ids
+            exclude_ids=valid_ids
         )
         
         return [(meta, score) for _, score, meta in results]
@@ -139,7 +147,7 @@ class BookRecommender:
         return self.db.get_all_genres()
     
     def get_genre_distribution(self) -> Dict[str, int]:
-        """Get count of books per genre"""
+        """Get count of items per genre"""
         genre_counts = Counter()
         for metadata in self.db.metadata_cache.values():
             genre = metadata.get('genre', 'Unknown')
@@ -148,8 +156,11 @@ class BookRecommender:
 
     def search_external(self, query: str, k: int = 5) -> List[Tuple[Dict, float]]:
         """
-        Search for books using OpenLibrary API (Fallback)
+        Search for external items (OpenLibrary for Books, placeholder for others)
         """
+        if self.media_type != 'book':
+            return [] # Only books supported currently for external
+            
         import requests
         
         results = []
@@ -183,12 +194,12 @@ class BookRecommender:
                         cover_url = "https://via.placeholder.com/150x200?text=No+Cover"
                     
                     # Create metadata dict matching our internal format
-                    book_data = {
+                    item_data = {
                         'id': f"ol_{doc.get('key', '').split('/')[-1]}", # Use OL key as unique ID
                         'title': title,
                         'author': author,
                         'genre': genre,
-                        'rating': 4.0, # Default rating for external books
+                        'rating': 4.0, # Default rating for external items
                         'pages': pages,
                         'year': year,
                         'description': f"Retrieved from OpenLibrary. First published in {year}.",
@@ -197,38 +208,35 @@ class BookRecommender:
                     }
                     
                     # Relevance score (from API order)
-                    results.append((book_data, 0.9))
+                    results.append((item_data, 0.9))
         
         except Exception as e:
             print(f"External API Error: {e}")
             
         return results
 
-    def get_book(self, book_id: str) -> Optional[Dict]:
-        """Get metadata for a single book by ID"""
+    def get_item(self, item_id: str) -> Optional[Dict]:
+        """Get metadata for a single item by ID"""
         # First check cache
-        if book_id in self.db.metadata_cache:
-            return self.db.metadata_cache[book_id]
-        
-        # If not in cache (rare if cache is consistent), try DB retrieval if supported
-        # For now, rely on cache
+        if item_id in self.db.metadata_cache:
+            return self.db.metadata_cache[item_id]
         return None
 
-    def add_external_book(self, book_data: Dict) -> bool:
+    def add_external_item(self, item_data: Dict) -> bool:
         """
-        Add an external book to the local database (Lazy Indexing)
+        Add an external item to the local database (Lazy Indexing)
         Generates a synthetic embedding based on genre/metadata
         """
         # Check if already exists
-        if book_data['id'] in self.db.metadata_cache:
+        if item_data['id'] in self.db.metadata_cache:
             return True
             
         try:
             # Generate synthetic embedding (128D) similar to generator
-            genre = book_data.get('genre', 'General')
+            genre = item_data.get('genre', 'General')
             vector = np.random.randn(128)
             
-            # Simple genre bias (deterministic based on genre name to keep it semi-consistent)
+            # Simple genre bias
             genre_hash = sum(ord(c) for c in genre)
             vector[genre_hash % 10] += 1.5 
             vector[(genre_hash + 1) % 10] += 0.5
@@ -237,31 +245,12 @@ class BookRecommender:
             vector = vector / np.linalg.norm(vector)
             
             # Ensure ID is set
-            if 'id' not in book_data:
+            if 'id' not in item_data:
                 return False
                 
             # Add to DB
-            self.db.add_books([vector], [book_data])
+            self.db.add_books([vector], [item_data]) # This method name in manager might need alias but works
             return True
         except Exception as e:
-            print(f"Error adding external book: {e}")
+            print(f"Error adding external item: {e}")
             return False
-
-
-# Example usage
-if __name__ == "__main__":
-    from srvdb_manager import SrvDBManager
-    
-    # Initialize
-    db_manager = SrvDBManager()
-    recommender = MusicRecommender(db_manager)
-    
-    # Get available genres
-    genres = recommender.get_available_genres()
-    print(f"Available genres: {genres}")
-    
-    # Create a mixed playlist
-    playlist = recommender.get_genre_mix(['Rock', 'Pop'], k=10)
-    print(f"\nMixed playlist ({len(playlist)} songs):")
-    for i, (song, score) in enumerate(playlist):
-        print(f"{i+1}. {song['title']} - {song['artist']}")
